@@ -37,6 +37,8 @@ use std::fmt;
 use std::hash::Hash;
 use std::iter::FromIterator;
 
+fn identity<T>(x: T) -> T { x }
+
 #[derive(Clone)]
 struct Dependency<T> {
     num_prec: usize,
@@ -84,6 +86,33 @@ impl<T: Hash + Eq + Clone> TopologicalSort<T> {
         TopologicalSort {
             top: HashMap::new(),
         }
+    }
+
+    /// Creates a `TopologicalSort` from an iterable and a comparator function.
+    pub fn by(iter: impl IntoIterator<Item = T>, compare: impl FnMut(&T, &T) -> Option<Ordering>) -> TopologicalSort<T> {
+        let mut top = TopologicalSort::new();
+        let mut seen = Vec::<T>::default();
+        for item in iter {
+            let _ = top.insert(item.clone());
+            for seen_item in seen.iter().cloned() {
+                match compare(&seen_item, &item) {
+                    Some(Ordering::Less) => {
+                        top.add_dependency(seen_item, item.clone());
+                    }
+                    Some(Ordering::Greater) => {
+                        top.add_dependency(item.clone(), seen_item);
+                    }
+                    _ => (),
+                }
+            }
+            seen.push(item);
+        }
+        top
+    }
+
+    /// Creates a `TopologicalSort` from an iterable and a key extraction function.
+    pub fn by_key<K: PartialOrd>(iter: impl IntoIterator<Item = T>, f: impl FnMut(&T) -> K) -> TopologicalSort<T> {
+        TopologicalSort::by(iter, |a, b| f(a).partial_cmp(&f(b)))
     }
 
     /// Returns the number of elements in the `TopologicalSort`.
@@ -226,24 +255,7 @@ impl<T: Hash + Eq + Clone> TopologicalSort<T> {
 
 impl<T: PartialOrd + Eq + Hash + Clone> FromIterator<T> for TopologicalSort<T> {
     fn from_iter<I: IntoIterator<Item = T>>(iter: I) -> TopologicalSort<T> {
-        let mut top = TopologicalSort::new();
-        let mut seen = Vec::<T>::default();
-        for item in iter {
-            let _ = top.insert(item.clone());
-            for seen_item in seen.iter().cloned() {
-                match seen_item.partial_cmp(&item) {
-                    Some(Ordering::Less) => {
-                        top.add_dependency(seen_item, item.clone());
-                    }
-                    Some(Ordering::Greater) => {
-                        top.add_dependency(item.clone(), seen_item);
-                    }
-                    _ => (),
-                }
-            }
-            seen.push(item);
-        }
-        top
+        TopologicalSort::by_key(iter, identity)
     }
 }
 
